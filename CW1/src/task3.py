@@ -112,17 +112,59 @@ def assign_preferred_fc(network_dict):
     assign["distance_bucket"] = pd.cut(assign["preferred_fc_distance"], bins=BUCKET_EDGES, labels=BUCKET_LABELS)
     return assign
 
+import seaborn as sns
+import matplotlib.cm as cm
+import matplotlib.colors as mcolors
+
 def plot_clusters(assign, network_name):
     fig = plt.figure(figsize=(12, 7))
     ax = plt.axes(projection=ccrs.LambertConformal())
     ax.set_extent([-125, -66.5, 24, 50], crs=ccrs.PlateCarree())
+
+    # 지도 피처
     ax.add_feature(cfeature.COASTLINE.with_scale('50m'))
     ax.add_feature(cfeature.BORDERS.with_scale('50m'))
     ax.add_feature(cfeature.STATES.with_scale('50m'), linewidth=0.5)
+
+    # 팔레트 (15FC까지 고려해서 충분히 구분되는 색)
+    fc_names = sorted(assign["preferred_fc"].dropna().unique())
+    palette = sns.color_palette("husl", n_colors=len(fc_names))  # 구분 잘되는 색환
+    color_map = {fc: palette[i] for i, fc in enumerate(fc_names)}
+
+    # ZIP 점 (연하고 작게)
     for fc_name, grp in assign.groupby("preferred_fc"):
-        ax.scatter(grp["lon"], grp["lat"], s=6, label=fc_name, alpha=0.7, transform=ccrs.PlateCarree())
-    ax.legend(markerscale=2, fontsize=7, ncol=2, frameon=False, loc="lower left")
+        color = color_map.get(fc_name, "gray")
+        ax.scatter(
+            grp["lon"], grp["lat"],
+            s=6, alpha=0.4,
+            color=color, transform=ccrs.PlateCarree(),
+            label=fc_name
+        )
+
+    # FC 삼각형 (크고 진하게, ZIP과 같은 색)
+    fc_map = assign.dropna(subset=["preferred_fc_zip3"]) \
+                   .groupby("preferred_fc")["preferred_fc_zip3"].first().to_dict()
+    for fc_name, fc_zip in fc_map.items():
+        row = base[base["zip3"] == int(fc_zip)]
+        if len(row) > 0:
+            color = color_map.get(fc_name, "red")
+            ax.scatter(
+                float(row["lon"].iloc[0]), float(row["lat"].iloc[0]),
+                s=200, marker="^", color=color,
+                edgecolor="black", linewidths=0.7,
+                label=f"{fc_name} (FC)",
+                transform=ccrs.PlateCarree(), zorder=5
+            )
+
+    # 범례: 왼쪽 바깥쪽
+    ax.legend(
+        markerscale=0.7, fontsize=7, ncol=1, frameon=False,
+        loc="center right", bbox_to_anchor=(-0.1, 0.5)
+    )
+    plt.subplots_adjust(left=0.15)
+
     ax.set_title(f"Task 3a — ZIP3 Clusters by Preferred FC ({network_name})", fontsize=12)
+
     plt.savefig(OUT_DIR / f"task3a_{network_name}_map.png", dpi=200, bbox_inches="tight")
     plt.close(fig)
 
