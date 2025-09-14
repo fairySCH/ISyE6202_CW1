@@ -1,223 +1,142 @@
-# =========================
-# Task 8 — Assembly Factory (AF) capacity vs smoothing, Lead Time = 0
-# =========================
 import numpy as np
 import pandas as pd
 from pathlib import Path
 
-# -------------------------
-# 0) Configuration
-# -------------------------
-project_root_folder = Path("/Users/shankaraadhithyaa/Desktop/Python/ISyE6202_CW1/CW1")
+# ========= SINGLE INPUT PATH =========
+IN_CSV = Path("/Users/shankaraadhithyaa/Desktop/Python/ISyE6202_CW1/CW1/output/task7/Task7 FC Daily.csv")
 
-# Point directly to your Task-7 daily file (must have: date, fc_id, fc_cycle, fc_target)
-input_task7_csv = Path("/Users/shankaraadhithyaa/Desktop/Python/ISyE6202_CW1/CW1/output/task7/task7_fc_daily_targets.csv")
+# ========= OUTPUT PATH =========
+OUT_DIR = Path("/Users/shankaraadhithyaa/Desktop/Python/ISyE6202_CW1/CW1/output/task8")
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Task 8 outputs folder
-output_folder_task8 = project_root_folder / "output" / "task8"
-output_folder_task8.mkdir(parents=True, exist_ok=True)
+# ========= PARAMS =========
+INIT_INV  = 0.0        # initial DC inventory at the DC
+AGG_NET   = False      # True: aggregate across all FCs (network); False: one FC
+FC_FILTER = None       # e.g., "FC_01" (only if AGG_NET is False)
 
-# Inventory starting condition at the Distribution Center (units)
-initial_dc_on_hand_inventory = 0.0
+# ========= HELPERS =========
+def pick_col(df, candidates, required=True):
+    for c in candidates:
+        if c in df.columns:
+            return c
+    if required:
+        raise RuntimeError(f"Missing any of columns: {candidates}")
+    return None
 
-# Choose network aggregation mode
-aggregate_network = False
-fulfillment_center_filter = None  # e.g., "AZ-852" or None
+def to_num(s: pd.Series) -> pd.Series:
+    return pd.to_numeric(s, errors="coerce").fillna(0.0).clip(lower=0.0)
 
-# Column names present in the Task-7 file
-column_name_date = "date"
-column_name_fulfillment_center_id = "fc_id"
-column_name_robust_daily_demand_task7 = "fc_cycle"    # robust daily demand (99th percentile)
-column_name_autonomy_target_stock_task7 = "fc_target"  # target autonomy stock (8-week-99%)
+# ========= LOAD =========
+df = pd.read_csv(IN_CSV)
 
-# -------------------------
-# 1) Load Task-7 daily file
-# -------------------------
-if not input_task7_csv.exists():
-    raise FileNotFoundError(f"Task-7 CSV not found at: {input_task7_csv}")
+# Support both “pretty” Task7 names and original names
+col_date   = pick_col(df, ["Date", "date"])
+col_fc     = pick_col(df, ["FC ID", "FC_ID", "fc_id"], required=False)
+col_cycle  = pick_col(df, ["FC Average", "fc_average", "fc_cycle"])
+col_target = pick_col(df, ["FC Target", "fc_target"])
 
-task7_dataframe_raw = pd.read_csv(input_task7_csv)
-required_cols = [column_name_date, column_name_robust_daily_demand_task7, column_name_autonomy_target_stock_task7]
-missing = [c for c in required_cols if c not in task7_dataframe_raw.columns]
-if missing:
-    raise RuntimeError(f"Input file is missing required columns: {missing}")
+df[col_date] = pd.to_datetime(df[col_date])
 
-task7_dataframe_raw[column_name_date] = pd.to_datetime(task7_dataframe_raw[column_name_date])
-
-# -------------------------
-# 2) Prepare daily series for Task 8
-# -------------------------
-if aggregate_network:
-    # Sum across all fulfillment centers per date
-    daily_dataframe = (
-        task7_dataframe_raw
-        .groupby(column_name_date, as_index=False)[[column_name_robust_daily_demand_task7,
-                                                    column_name_autonomy_target_stock_task7]]
-        .sum()
-        .sort_values(column_name_date)
-        .reset_index(drop=True)
-    )
-    daily_dataframe = daily_dataframe.rename(columns={
-        column_name_robust_daily_demand_task7: "robust_daily_demand",
-        column_name_autonomy_target_stock_task7: "autonomy_target_stock_8week_99pct"
-    })
+# ========= SCOPE (network vs single FC) =========
+if AGG_NET:
+    daily = (df.groupby(col_date, as_index=False)[[col_cycle, col_target]]
+               .sum().sort_values(col_date).reset_index(drop=True))
 else:
-    # Single fulfillment center pathway
-    if fulfillment_center_filter is not None and column_name_fulfillment_center_id in task7_dataframe_raw.columns:
-        subset = task7_dataframe_raw[task7_dataframe_raw[column_name_fulfillment_center_id] == fulfillment_center_filter].copy()
-        if subset.empty:
-            raise RuntimeError(f"No rows found for fulfillment_center_id='{fulfillment_center_filter}'.")
-        daily_dataframe = subset.sort_values(column_name_date).reset_index(drop=True)
-        print(f"[INFO] Using fulfillment_center_id: {fulfillment_center_filter}")
+    if FC_FILTER and (col_fc in df.columns):
+        daily = df[df[col_fc] == FC_FILTER].copy()
+        if daily.empty:
+            raise RuntimeError(f"No rows for {col_fc}='{FC_FILTER}'.")
+        daily = daily.sort_values(col_date).reset_index(drop=True)
     else:
-        if column_name_fulfillment_center_id in task7_dataframe_raw.columns:
-            first_fc_id = task7_dataframe_raw[column_name_fulfillment_center_id].iloc[0]
-            daily_dataframe = (
-                task7_dataframe_raw[task7_dataframe_raw[column_name_fulfillment_center_id] == first_fc_id]
-                .sort_values(column_name_date)
-                .reset_index(drop=True)
-            )
-            print(f"[INFO] No filter set; using first fulfillment_center_id found: {first_fc_id}")
+        if col_fc in df.columns:
+            first_fc = df[col_fc].iloc[0]
+            daily = df[df[col_fc] == first_fc].sort_values(col_date).reset_index(drop=True)
         else:
-            # Already single-DC data
-            daily_dataframe = task7_dataframe_raw.sort_values(column_name_date).reset_index(drop=True)
+            daily = df.sort_values(col_date).reset_index(drop=True)
 
-    daily_dataframe = daily_dataframe.rename(columns={
-        column_name_robust_daily_demand_task7: "robust_daily_demand",
-        column_name_autonomy_target_stock_task7: "autonomy_target_stock_8week_99pct"
-    })[[column_name_date, "robust_daily_demand", "autonomy_target_stock_8week_99pct"]]
+# Standardize columns
+daily = daily.rename(columns={col_date: "Date", col_cycle: "Demand", col_target: "Target"})[["Date", "Demand", "Target"]]
+daily["Demand"] = to_num(daily["Demand"])
+daily["Target"] = to_num(daily["Target"])
+daily = daily.sort_values("Date").reset_index(drop=True)
+if daily.empty:
+    raise RuntimeError("No daily rows to process.")
 
-# Clean and standardize
-daily_dataframe = daily_dataframe.rename(columns={column_name_date: "date"})
-daily_dataframe["robust_daily_demand"] = pd.to_numeric(
-    daily_dataframe["robust_daily_demand"], errors="coerce"
-).fillna(0.0).clip(lower=0.0)
+d = daily["Demand"].to_numpy(float)
+t = daily["Target"].to_numpy(float)
+n = len(d)
 
-daily_dataframe["autonomy_target_stock_8week_99pct"] = pd.to_numeric(
-    daily_dataframe["autonomy_target_stock_8week_99pct"], errors="coerce"
-).fillna(0.0).clip(lower=0.0)
+# ========= Strategy A: Follow Demand (Chase) =========
+inv_beg = np.zeros(n + 1); inv_beg[0] = INIT_INV
+af_prod_chase = np.zeros(n); dc_inv_mid_chase = np.zeros(n)
 
-daily_dataframe = daily_dataframe.sort_values("date").reset_index(drop=True)
-if len(daily_dataframe) == 0:
-    raise RuntimeError("No daily rows to process after filtering/aggregation.")
+for i in range(n):
+    af_prod_chase[i]    = max(0.0, t[i] - inv_beg[i])
+    dc_inv_mid_chase[i] = inv_beg[i] + af_prod_chase[i]
+    inv_beg[i+1]        = max(0.0, dc_inv_mid_chase[i] - d[i])
 
-# -------------------------
-# 3) Strategy A — Chase the autonomy target (Lead Time = 0)
-# -------------------------
-robust_daily_demand_array = daily_dataframe["robust_daily_demand"].to_numpy(dtype=float)
-autonomy_target_stock_array = daily_dataframe["autonomy_target_stock_8week_99pct"].to_numpy(dtype=float)
-time_horizon_days = len(daily_dataframe)
+peak_cap_a = float(af_prod_chase.max()) if n else 0.0
+peak_mid_a = float(dc_inv_mid_chase.max()) if n else 0.0
+peak_eod_a = float(inv_beg[1:].max()) if n else 0.0
 
-dc_on_hand_inventory_start_of_day = np.zeros(time_horizon_days + 1, dtype=float)
-dc_on_hand_inventory_start_of_day[0] = float(initial_dc_on_hand_inventory)
+# ========= Strategy B: Steady Rate (Level) =========
+cum_d_prev = np.concatenate(([0.0], np.cumsum(d)[:-1]))
+rate_cands = (t - INIT_INV + cum_d_prev) / (np.arange(n) + 1)
+rate = float(max(0.0, rate_cands.max())) if n else 0.0
 
-af_daily_production_chase = np.zeros(time_horizon_days, dtype=float)
-dc_inventory_after_arrival_before_demand_chase = np.zeros(time_horizon_days, dtype=float)
+inv_beg_b = np.zeros(n + 1); inv_beg_b[0] = INIT_INV
+dc_inv_mid_level = np.zeros(n)
 
-for day_index in range(time_horizon_days):
-    # Minimal production today so that (inventory after arrivals) meets today's target
-    af_daily_production_chase[day_index] = max(
-        0.0,
-        autonomy_target_stock_array[day_index] - dc_on_hand_inventory_start_of_day[day_index]
-    )
-    # Inventory at DC after arrival, before serving demand
-    dc_inventory_after_arrival_before_demand_chase[day_index] = (
-        dc_on_hand_inventory_start_of_day[day_index] + af_daily_production_chase[day_index]
-    )
-    # End-of-day on-hand inventory after serving today's demand
-    dc_on_hand_inventory_start_of_day[day_index + 1] = max(
-        0.0,
-        dc_inventory_after_arrival_before_demand_chase[day_index] - robust_daily_demand_array[day_index]
-    )
+for i in range(n):
+    dc_inv_mid_level[i] = inv_beg_b[i] + rate
+    inv_beg_b[i+1]      = max(0.0, dc_inv_mid_level[i] - d[i])
 
-peak_af_daily_capacity_chase = float(af_daily_production_chase.max())
-peak_dc_storage_within_day_chase = float(dc_inventory_after_arrival_before_demand_chase.max())
-peak_dc_storage_end_of_day_chase = float(dc_on_hand_inventory_start_of_day[1:].max())
+peak_cap_b = rate
+peak_mid_b = float(dc_inv_mid_level.max()) if n else 0.0
+peak_eod_b = float(inv_beg_b[1:].max()) if n else 0.0
 
-# -------------------------
-# 4) Strategy B — Leveled (steady) production (Lead Time = 0)
-# -------------------------
-# Minimal feasible constant rate:
-#   constant_rate_star = max_t (autonomy_target_stock_8week_99pct_t - I0 + sum_{k=0}^{t-1} robust_daily_demand_k) / (t+1)
-cumulative_demand_previous_days = np.concatenate(
-    ([0.0], np.cumsum(robust_daily_demand_array)[:-1])
-)
-constant_rate_candidates = (
-    (autonomy_target_stock_array - float(initial_dc_on_hand_inventory) + cumulative_demand_previous_days)
-    / (np.arange(time_horizon_days) + 1)
-)
-constant_rate_star = float(max(0.0, np.max(constant_rate_candidates)))
-
-dc_on_hand_inventory_start_of_day_level = np.zeros(time_horizon_days + 1, dtype=float)
-dc_on_hand_inventory_start_of_day_level[0] = float(initial_dc_on_hand_inventory)
-
-dc_inventory_after_arrival_before_demand_level = np.zeros(time_horizon_days, dtype=float)
-
-for day_index in range(time_horizon_days):
-    # After-arrival (since lead time = 0) inventory with constant production
-    dc_inventory_after_arrival_before_demand_level[day_index] = (
-        dc_on_hand_inventory_start_of_day_level[day_index] + constant_rate_star
-    )
-    # End-of-day inventory after serving demand
-    dc_on_hand_inventory_start_of_day_level[day_index + 1] = max(
-        0.0,
-        dc_inventory_after_arrival_before_demand_level[day_index] - robust_daily_demand_array[day_index]
-    )
-
-peak_af_daily_capacity_level = constant_rate_star
-peak_dc_storage_within_day_level = float(dc_inventory_after_arrival_before_demand_level.max())
-peak_dc_storage_end_of_day_level = float(dc_on_hand_inventory_start_of_day_level[1:].max())
-
-# -------------------------
-# 5) Build outputs (UPPERCASE column names)
-# -------------------------
-chase_output_dataframe = pd.DataFrame({
-    "DATE": daily_dataframe["date"],
-    "ROBUST_DAILY_DEMAND": robust_daily_demand_array,
-    "AUTONOMY_TARGET_STOCK_8WEEK_99PCT": autonomy_target_stock_array,
-    "AF_DAILY_PRODUCTION_CHASE": af_daily_production_chase,
-    "DC_INVENTORY_AFTER_ARRIVAL_BEFORE_DEMAND_CHASE": dc_inventory_after_arrival_before_demand_chase,
-    "DC_ON_HAND_INVENTORY_END_OF_DAY_CHASE": dc_on_hand_inventory_start_of_day[1:],
+# ========= Outputs (your requested names) =========
+df_a = pd.DataFrame({
+    "Date": daily["Date"],
+    "Demand": d,
+    "Target": t,
+    "AF Production": af_prod_chase,
+    "DC Inventory": dc_inv_mid_chase,
+    "DC Inventory EOD": inv_beg[1:],
 })
 
-level_output_dataframe = pd.DataFrame({
-    "DATE": daily_dataframe["date"],
-    "ROBUST_DAILY_DEMAND": robust_daily_demand_array,
-    "AUTONOMY_TARGET_STOCK_8WEEK_99PCT": autonomy_target_stock_array,
-    "AF_DAILY_PRODUCTION_LEVELED_CONSTANT_RATE": constant_rate_star,
-    "DC_INVENTORY_AFTER_ARRIVAL_BEFORE_DEMAND_LEVELED": dc_inventory_after_arrival_before_demand_level,
-    "DC_ON_HAND_INVENTORY_END_OF_DAY_LEVELED": dc_on_hand_inventory_start_of_day_level[1:],
+df_b = pd.DataFrame({
+    "Date": daily["Date"],
+    "Demand": d,
+    "Target": t,
+    "AF Steady Rate": rate,
+    "DC Inventory": dc_inv_mid_level,
+    "DC Inventory EOD": inv_beg_b[1:],
 })
 
-summary_output_dataframe = pd.DataFrame({
-    "METRIC_NAME": [
-        "AF_PEAK_DAILY_CAPACITY",
-        "DC_PEAK_STORAGE_WITHIN_DAY",
-        "DC_PEAK_STORAGE_END_OF_DAY"
-    ],
-    "STRATEGY_A_CHASE_VALUE": [
-        peak_af_daily_capacity_chase,
-        peak_dc_storage_within_day_chase,
-        peak_dc_storage_end_of_day_chase
-    ],
-    "STRATEGY_B_LEVELED_VALUE": [
-        peak_af_daily_capacity_level,
-        peak_dc_storage_within_day_level,
-        peak_dc_storage_end_of_day_level
-    ]
+df_sum = pd.DataFrame({
+    "Peak Loads":   ["af_peak_daily_cap", "dc_peak_mid", "dc_peak_eod"],
+    "Follow Demand":[peak_cap_a,            peak_mid_a,    peak_eod_a],
+    "Steady Rate":  [peak_cap_b,            peak_mid_b,    peak_eod_b],
 })
 
-# -------------------------
-# 6) Save files
-# -------------------------
-chase_output_path = output_folder_task8 / "task8_AF_Strategy_A.csv"
-level_output_path = output_folder_task8 / "task8_AF_Strategy_B.csv"
-summary_output_path = output_folder_task8 / "task8_AF_Summary_L0.csv"
+# File names (keeping your “Startegy” spelling)
+p_a = OUT_DIR / "Task8 Strategy A.csv"
+p_b = OUT_DIR / "Task8 Startegy B.csv"
+p_s = OUT_DIR / "Task8 AF Startegy Summary.csv"
 
-chase_output_dataframe.to_csv(chase_output_path, index=False)
-level_output_dataframe.to_csv(level_output_path, index=False)
-summary_output_dataframe.to_csv(summary_output_path, index=False)
+df_a.to_csv(p_a, index=False)
+df_b.to_csv(p_b, index=False)
+df_sum.to_csv(p_s, index=False)
 
-print("== Task 8 (Lead Time = 0) — Results ==")
-print(summary_output_dataframe.to_string(index=False))
-print(f"\nFiles written to: {output_folder_task8}")
+# Combined Excel
+with pd.ExcelWriter(OUT_DIR / "Task8 Report.xlsx") as xw:
+    df_a.to_excel(xw, sheet_name="Strategy A", index=False)
+    df_b.to_excel(xw, sheet_name="Strategy B", index=False)
+    df_sum.to_excel(xw, sheet_name="Summary", index=False)
+
+print("✅ Wrote:")
+print(" -", p_a)
+print(" -", p_b)
+print(" -", p_s)
+print(" -", OUT_DIR / "Task8 Report.xlsx")
