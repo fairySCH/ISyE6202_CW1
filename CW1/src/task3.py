@@ -178,6 +178,43 @@ def plot_clusters(assign, network_name):
     plt.savefig(OUT_DIR / f"task3a_{network_name}_map.png", dpi=200, bbox_inches="tight")
     plt.close(fig)
 
+def plot_fc_market_demand_share(network_name: str):
+    """
+    Plot grouped bar chart of demand share by FC and Market type.
+    Input: task3b_fc_market_demand_share_{network}.csv
+    Output: task3b_fc_market_demand_share_{network}_plot.png
+    """
+    import seaborn as sns
+
+    csv_path = OUT_DIR / f"task3b_fc_market_demand_share_{network_name}.csv"
+    if not csv_path.exists():
+        print(f"[Warning] File not found: {csv_path}")
+        return
+
+    df = pd.read_csv(csv_path)
+    if df.empty:
+        print(f"[Warning] Empty data in {csv_path}")
+        return
+
+    # Sort values for consistent order
+    df = df.sort_values(["preferred_fc","market_type"])
+
+    # Plot
+    plt.figure(figsize=(10,6))
+    sns.barplot(data=df, x="preferred_fc", y="demand_share", hue="market_type")
+
+    plt.title(f"Task 3b — FC × Market Demand Share ({network_name})", fontsize=14)
+    plt.xlabel("Fulfillment Center", fontsize=12)
+    plt.ylabel("Demand Share", fontsize=12)
+    plt.legend(title="Market Type")
+    plt.xticks(rotation=30)
+
+    plt.tight_layout()
+    out_path = OUT_DIR / f"task3b_fc_market_demand_share_{network_name}_plot.png"
+    plt.savefig(out_path, dpi=220)
+    plt.close()
+    print(f"  ✓ Saved plot: {out_path}")
+
 def compute_task3b(assign, network_name):
     """Compute aggregated demand share per FC and per FC×Market combination."""
     # FC-level
@@ -223,6 +260,7 @@ def run_for_network(network_name, fc_dict):
     plot_clusters(assign, network_name)
     compute_task3b(assign, network_name)
     compute_task3c(assign, network_name)
+    plot_fc_market_demand_share(network_name)
 
 def main():
     for net, fcs in NETWORKS.items():
