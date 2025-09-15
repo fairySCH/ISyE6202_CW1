@@ -1,4 +1,4 @@
-zip3,pmf,market,market_type,lat,lon,pmf_norm,preferred_fc_zip3,preferred_fc_distance,preferred_fc,distance_bucket
+zip3,pmf,market_type,state,lat,lon,pmf_norm,preferred_fc_zip3,preferred_fc_distance,preferred_fc,distance_bucket
 10,0.002021748,Primary,MA,42.22159842,-72.57355816,0.002021749781161557,134,153,NY-134,151-300
 11,0.001159576,Primary,MA,42.10577295,-72.58373891,0.0011595770215873562,134,156,NY-134,151-300
 12,0.000564768,Secondary,MA,42.39659452,-73.23757603,0.0005647684975610464,134,117,NY-134,51-150
