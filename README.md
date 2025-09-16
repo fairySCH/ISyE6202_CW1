@@ -3,6 +3,7 @@
 
 ## Repository Structure
 
+```md
 CW1/
 ├── data/                  # Input datasets
 │   ├── demand\_seasonalities.csv
@@ -30,8 +31,10 @@ CW1/
 │   ├── Task7.py
 │   └── Task8.py
 └── report/                # Final report document(s)
+```
 
 ## Execution Flow
+
 1. **Task 1–2 (`task1_2.py`)** – Demand sizing, seasonality, uncertainty.
 2. **Task 3 (`task3.py`)** – Assign ZIP3 → FC, compute demand shares.
 3. **Task 4 (`task4.py`)** – Candidate clusters, feasibility, 90/10 reallocation.
@@ -41,6 +44,7 @@ CW1/
 7. **Task 8 (`Task8.py`)** – Chase vs Steady production strategy.
 
 ## Data Flow
+
 - `data/` → consumed by Task 1–3.
 - Task 1–2 → seasonality demand CSV → Task 5–8.
 - Task 3 → assignment CSV → Task 5–7.
@@ -49,6 +53,7 @@ CW1/
 - All outputs → `output/{task}/`.
 
 ## How to Run
+
 ```bash
 cd src
 python task1_2.py
