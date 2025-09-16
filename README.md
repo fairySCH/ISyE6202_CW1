@@ -3,6 +3,7 @@
 
 ## Repository Structure
 
+```md
 CW1/
 ├── data/                  # Input datasets
 │   ├── demand\_seasonalities.csv
@@ -30,6 +31,7 @@ CW1/
 │   ├── Task7.py
 │   └── Task8.py
 └── report/                # Final report document(s)
+```
 
 ## Execution Flow
 1. **Task 1–2 (`task1_2.py`)** – Demand sizing, seasonality, uncertainty.
