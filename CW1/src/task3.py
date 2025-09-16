@@ -8,13 +8,15 @@ Inputs (expected in CW1/data):
   - fc_zip3_distance.csv
 
 Outputs (written to CW1/output/task3/):
-  - (a) cluster plots per network: task3a_{network}.png
-  - (b) tables:
+  - (a) cluster maps: task3a_{network}_map_plotly.html
+  - (b) demand share tables and plots:
         task3b_fc_demand_share_{network}.csv
         task3b_fc_market_demand_share_{network}.csv
-  - (c) tables:
+        task3b_fc_market_demand_share_{network}_plot.png
+  - (c) distance distribution tables and plots:
         task3c_market_distance_distribution_{network}.csv
         task3c_fc_market_distance_distribution_{network}.csv
+        task3c_market_distance_distribution_{network}_plot.png
   - helper: assignment_{network}.csv
 """
 
@@ -22,9 +24,8 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import cartopy.crs as ccrs
-import cartopy.feature as cfeature
 import seaborn as sns
+import plotly.graph_objects as go
 
 # -----------------------------
 # Configuration
@@ -63,16 +64,15 @@ zip3_market.columns = [c.strip().lower() for c in zip3_market.columns]
 zip3_coords.columns = [c.strip().lower() for c in zip3_coords.columns]
 dist.columns = [c.strip().lower() for c in dist.columns]
 
-# Ensure correct mapping for demand PMF
+# Ensure PMF column
 if "pmf" not in zip3_pmf.columns:
     zip3_pmf = zip3_pmf.rename(columns={zip3_pmf.columns[-1]: "pmf"})
 
-# ✅ Explicitly use the "market" column for Primary/Secondary/Tertiary
+# Use "Market" column (Primary/Secondary/Tertiary)
 if "market" not in zip3_market.columns:
     raise ValueError("zip3_market.csv must contain a 'Market' column with values Primary/Secondary/Tertiary")
 zip3_market = zip3_market.rename(columns={"market": "market_type"})
 zip3_market["market_type"] = zip3_market["market_type"].astype(str).str.strip().str.title()
-
 valid_markets = {"Primary","Secondary","Tertiary"}
 bad_values = set(zip3_market["market_type"].unique()) - valid_markets
 if bad_values:
@@ -135,95 +135,120 @@ def assign_preferred_fc(network_dict):
                                                categories=BUCKET_LABELS, ordered=True)
     return assign
 
-def plot_clusters(assign, network_name):
-    """Plot ZIP clusters by preferred FC with FCs shown as triangles."""
-    fig = plt.figure(figsize=(12, 7))
-    ax = plt.axes(projection=ccrs.LambertConformal())
-    ax.set_extent([-125, -66.5, 24, 50], crs=ccrs.PlateCarree())
-
-    # Map features
-    ax.add_feature(cfeature.COASTLINE.with_scale('50m'))
-    ax.add_feature(cfeature.BORDERS.with_scale('50m'))
-    ax.add_feature(cfeature.STATES.with_scale('50m'), linewidth=0.5)
-
-    # Color palette
+def plot_clusters_plotly(assign, network_name):
+    """Plot clusters using Plotly (interactive HTML)."""
     fc_names = sorted(assign["preferred_fc"].dropna().unique())
     palette = sns.color_palette("husl", n_colors=len(fc_names))
-    color_map = {fc: palette[i] for i, fc in enumerate(fc_names)}
+    color_map = {fc: f"rgb({int(r*255)}, {int(g*255)}, {int(b*255)})"
+                 for fc, (r,g,b) in zip(fc_names, palette)}
+
+    fig = go.Figure()
 
     # ZIP dots
     for fc_name, grp in assign.groupby("preferred_fc"):
-        ax.scatter(grp["lon"], grp["lat"], s=6, alpha=0.4,
-                   color=color_map.get(fc_name, "gray"),
-                   transform=ccrs.PlateCarree(), label=fc_name)
+        fig.add_trace(go.Scattergeo(
+            lon=grp["lon"],
+            lat=grp["lat"],
+            mode="markers",
+            name=f"{fc_name} ZIPs",
+            marker=dict(size=3, color=color_map.get(fc_name, "gray"), opacity=0.5),
+            hoverinfo="text",
+            text=[f"ZIP3: {z}, Market: {m}" for z, m in zip(grp["zip3"], grp["market_type"])]
+        ))
 
     # FC triangles
     fc_map = assign.dropna(subset=["preferred_fc_zip3"]) \
                    .groupby("preferred_fc")["preferred_fc_zip3"].first().to_dict()
     for fc_name, fc_zip in fc_map.items():
-        row = base[base["zip3"] == int(fc_zip)]
+        row = assign[assign["zip3"] == int(fc_zip)]
         if len(row) > 0:
-            ax.scatter(float(row["lon"].iloc[0]), float(row["lat"].iloc[0]),
-                       s=200, marker="^", color=color_map.get(fc_name, "red"),
-                       edgecolor="black", linewidths=0.7,
-                       label=f"{fc_name} (FC)",
-                       transform=ccrs.PlateCarree(), zorder=5)
+            fig.add_trace(go.Scattergeo(
+                lon=[float(row["lon"].iloc[0])],
+                lat=[float(row["lat"].iloc[0])],
+                mode="markers+text",
+                name=f"{fc_name} (FC)",
+                marker=dict(size=12, symbol="triangle-up",
+                            color=color_map.get(fc_name, "red"),
+                            line=dict(width=1, color="black")),
+                text=[fc_name],
+                textposition="top center"
+            ))
 
-    # Legend
-    ax.legend(markerscale=0.7, fontsize=7, ncol=1, frameon=False,
-              loc="center right", bbox_to_anchor=(-0.1, 0.5))
-    plt.subplots_adjust(left=0.15)
+    fig.update_layout(
+        title=f"Task 3a — ZIP3 Clusters by Preferred FC ({network_name})",
+        geo=dict(
+            scope="usa",
+            projection=dict(type="albers usa"),
+            showland=True, landcolor="rgb(240,240,240)",
+            subunitcolor="rgb(100,100,100)",
+            countrycolor="rgb(100,100,100)"
+        ),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.25,
+                    xanchor="center", x=0.5)
+    )
 
-    ax.set_title(f"Task 3a — ZIP3 Clusters by Preferred FC ({network_name})", fontsize=12)
-    plt.savefig(OUT_DIR / f"task3a_{network_name}_map.png", dpi=200, bbox_inches="tight")
-    plt.close(fig)
+    out_path = OUT_DIR / f"task3a_{network_name}_map_plotly.html"
+    fig.write_html(out_path)
+    print(f"  ✓ Saved interactive map: {out_path}")
 
 def plot_fc_market_demand_share(network_name: str):
-    """
-    Plot grouped bar chart of demand share by FC and Market type.
-    Input: task3b_fc_market_demand_share_{network}.csv
-    Output: task3b_fc_market_demand_share_{network}_plot.png
-    """
-    import seaborn as sns
-
+    """Grouped bar chart: demand share by FC × Market."""
     csv_path = OUT_DIR / f"task3b_fc_market_demand_share_{network_name}.csv"
     if not csv_path.exists():
-        print(f"[Warning] File not found: {csv_path}")
         return
-
     df = pd.read_csv(csv_path)
-    if df.empty:
-        print(f"[Warning] Empty data in {csv_path}")
-        return
-
-    # Sort values for consistent order
     df = df.sort_values(["preferred_fc","market_type"])
-
-    # Plot
     plt.figure(figsize=(10,6))
-    sns.barplot(data=df, x="preferred_fc", y="demand_share", hue="market_type")
+    ax = sns.barplot(data=df, x="preferred_fc", y="demand_share", hue="market_type")
 
-    plt.title(f"Task 3b — FC × Market Demand Share ({network_name})", fontsize=14)
-    plt.xlabel("Fulfillment Center", fontsize=12)
-    plt.ylabel("Demand Share", fontsize=12)
-    plt.legend(title="Market Type")
-    plt.xticks(rotation=30)
+    ymax = df["demand_share"].max() * 1.1
+    offset = ymax * 0.01  # 1% of y max as offset
 
+    for p in ax.patches:
+        h = p.get_height()
+        if h > 0:
+            ax.annotate(f"{h:.3f}",
+                        (p.get_x() + p.get_width() / 2., h + offset),
+                        ha='center', va='bottom', fontsize=7, rotation=90)
+
+    ax.set_ylim(0, ymax)
+    plt.title(f"Task 3b — FC × Market Demand Share ({network_name})")
     plt.tight_layout()
     out_path = OUT_DIR / f"task3b_fc_market_demand_share_{network_name}_plot.png"
     plt.savefig(out_path, dpi=220)
     plt.close()
-    print(f"  ✓ Saved plot: {out_path}")
+
+def plot_market_distance_distribution(network_name: str):
+    """Grouped bar chart: demand share by Market × Distance bucket."""
+    csv_path = OUT_DIR / f"task3c_market_distance_distribution_{network_name}.csv"
+    if not csv_path.exists():
+        return
+    df = pd.read_csv(csv_path)
+    df["distance_bucket"] = pd.Categorical(df["distance_bucket"], categories=BUCKET_LABELS, ordered=True)
+    df = df.sort_values(["market_type","distance_bucket"])
+    plt.figure(figsize=(12,6))
+    ax = sns.barplot(data=df, x="distance_bucket", y="demand_share", hue="market_type")
+
+    ymax = df["demand_share"].max() * 1.1
+    offset = ymax * 0.01  # 1% of y max as offset
+
+    for p in ax.patches:
+        h = p.get_height()
+        if h > 0:
+            ax.annotate(f"{h:.3f}", (p.get_x()+p.get_width()/2., h + offset),
+                        ha='center', va='bottom', fontsize=7, rotation=90)
+    ax.set_ylim(0, ymax)
+    plt.title(f"Task 3c — Market × Distance Bucket Demand Share ({network_name})")
+    plt.tight_layout()
+    out_path = OUT_DIR / f"task3c_market_distance_distribution_{network_name}_plot.png"
+    plt.savefig(out_path, dpi=220); plt.close()
 
 def compute_task3b(assign, network_name):
-    """Compute aggregated demand share per FC and per FC×Market combination."""
-    # FC-level
+    """Compute demand share per FC and per FC×Market."""
     g_fc = assign.groupby("preferred_fc", dropna=False)["pmf_norm"].sum().reset_index()
     g_fc = g_fc.rename(columns={"pmf_norm": "demand_share"})
     g_fc.to_csv(OUT_DIR / f"task3b_fc_demand_share_{network_name}.csv", index=False)
 
-    # FC × Market-level
-    assign = assign.copy()
     cats = ["Primary","Secondary","Tertiary"]
     assign["market_type"] = pd.Categorical(assign["market_type"], categories=cats, ordered=True)
     g_fc_mt = assign.groupby(["preferred_fc","market_type"], dropna=False)["pmf_norm"].sum().reset_index()
@@ -231,12 +256,9 @@ def compute_task3b(assign, network_name):
     g_fc_mt.to_csv(OUT_DIR / f"task3b_fc_market_demand_share_{network_name}.csv", index=False)
 
 def compute_task3c(assign, network_name):
-    """Compute demand distribution by market type and distance bucket."""
+    """Compute demand distribution by Market × Distance and FC × Market × Distance."""
     sub = assign.dropna(subset=["distance_bucket"]).copy()
-    sub["distance_bucket"] = pd.Categorical(sub["distance_bucket"],
-                                            categories=BUCKET_LABELS, ordered=True)
-
-    # Market × Distance
+    sub["distance_bucket"] = pd.Categorical(sub["distance_bucket"], categories=BUCKET_LABELS, ordered=True)
     mt = sub.groupby(["market_type","distance_bucket"], dropna=False)["pmf_norm"].sum()
     all_mt = sub["market_type"].dropna().unique().tolist()
     full_idx = pd.MultiIndex.from_product([all_mt, BUCKET_LABELS],
@@ -244,8 +266,6 @@ def compute_task3c(assign, network_name):
     mt = mt.reindex(full_idx, fill_value=0).reset_index()
     mt = mt.rename(columns={"pmf_norm": "demand_share"})
     mt.to_csv(OUT_DIR / f"task3c_market_distance_distribution_{network_name}.csv", index=False)
-
-    # FC × Market × Distance
     fcm = sub.groupby(["preferred_fc","market_type","distance_bucket"], dropna=False)["pmf_norm"].sum()
     all_fc = sub["preferred_fc"].dropna().unique().tolist()
     full_idx2 = pd.MultiIndex.from_product([all_fc, all_mt, BUCKET_LABELS],
@@ -257,10 +277,11 @@ def compute_task3c(assign, network_name):
 def run_for_network(network_name, fc_dict):
     assign = assign_preferred_fc(fc_dict)
     assign.to_csv(OUT_DIR / f"assignment_{network_name}.csv", index=False)
-    plot_clusters(assign, network_name)
+    plot_clusters_plotly(assign, network_name)
     compute_task3b(assign, network_name)
     compute_task3c(assign, network_name)
     plot_fc_market_demand_share(network_name)
+    plot_market_distance_distribution(network_name)
 
 def main():
     for net, fcs in NETWORKS.items():

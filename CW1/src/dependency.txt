@@ -1,0 +1,11 @@
+# Core scientific stack
+numpy
+pandas
+matplotlib
+seaborn
+
+# Cartopy and geospatial deps
+cartopy
+shapely
+pyshp
+pyproj
