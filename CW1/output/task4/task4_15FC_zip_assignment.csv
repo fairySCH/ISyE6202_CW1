@@ -1,4 +1,4 @@
-zip3,pmf,market,market_type,lat,lon,pmf_norm,preferred_fc_zip3,preferred_fc_distance,preferred_fc,preferred_bucket,candidate_fc_zip3_set,candidate_fc_name_set,candidate_count,cluster_id
+zip3,pmf,market_type,state,lat,lon,pmf_norm,preferred_fc_zip3,preferred_fc_distance,preferred_fc,preferred_bucket,candidate_fc_zip3_set,candidate_fc_name_set,candidate_count,cluster_id
 10,0.002021748,Primary,MA,42.22159842,-72.57355816,0.002021749781161557,21,77,MA-021,51-150,"21,70","MA-021,NJ-070",2,MA-021|NJ-070
 11,0.001159576,Primary,MA,42.10577295,-72.58373891,0.0011595770215873562,21,79,MA-021,51-150,"21,70","MA-021,NJ-070",2,MA-021|NJ-070
 12,0.000564768,Secondary,MA,42.39659452,-73.23757603,0.0005647684975610464,21,111,MA-021,51-150,"21,70","MA-021,NJ-070",2,MA-021|NJ-070
