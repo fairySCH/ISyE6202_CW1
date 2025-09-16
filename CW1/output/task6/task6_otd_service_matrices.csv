@@ -1,0 +1,11 @@
+Network,1-FC,1-FC,1-FC,4-FC,4-FC,4-FC,15-FC,15-FC,15-FC
+Market,Primary,Secondary,Tertiary,Primary,Secondary,Tertiary,Primary,Secondary,Tertiary
+distance_bucket,,,,,,,,,
+<50,2-day,3-day,4-day,2-day,3-day,4-day,2-day,3-day,4-day
+51-150,2-day,3-day,4-day,2-day,3-day,4-day,2-day,3-day,4-day
+151-300,2-day,3-day,4-day,2-day,3-day,4-day,2-day,3-day,4-day
+301-600,2-day,3-day,4-day,2-day,3-day,4-day,2-day,3-day,4-day
+601-1000,3-day,3-day,4-day,3-day,3-day,4-day,3-day,3-day,4-day
+1001-1400,4-day,4-day,4-day,,,,,,
+1401-1800,4-day,5-day,5-day,,,,,,
+>1800,4-day,5-day,5-day,,,,,,
