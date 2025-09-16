@@ -142,6 +142,34 @@ def main():
     detailed_optimal_df.to_csv(detailed_optimal_path, index=False)
     print(f"-> Detailed optimal policy financials saved to: {detailed_optimal_path}")
 
+    # Compute expected financials by market and overall for the optimal policy
+    financials_summary = final_optimal_choices.groupby(['Network', 'market_type']).agg(
+        Total_Revenue=('total_revenue', 'sum'),
+        Total_Shipping_Cost=('total_shipping_cost', 'sum'),
+        Total_COGS=('total_cogs', 'sum'),
+        Gross_Operating_Profit=('gross_operating_profit', 'sum')
+    ).reset_index()
+    financials_summary['Net_Revenue'] = financials_summary['Total_Revenue'] - financials_summary['Total_Shipping_Cost']
+
+    # Compute overall totals for each network
+    overall_summary = financials_summary.groupby('Network').agg(
+        Total_Revenue=('Total_Revenue', 'sum'),
+        Total_Shipping_Cost=('Total_Shipping_Cost', 'sum'),
+        Total_COGS=('Total_COGS', 'sum'),
+        Gross_Operating_Profit=('Gross_Operating_Profit', 'sum'),
+        Net_Revenue=('Net_Revenue', 'sum')
+    ).reset_index()
+    overall_summary['market_type'] = 'Overall'
+
+    # Combine market and overall summaries
+    financials_full = pd.concat([financials_summary, overall_summary], ignore_index=True)
+
+    # CSV 4: comprehensive financial summary
+    financials_csv_path = OUTPUT_DIR / "task6_optimal_policy_financials.csv"
+    financials_full.to_csv(financials_csv_path, index=False)
+    print(f"-> Optimal policy financials by market and overall saved to: {financials_csv_path}")
+
+
     # graph 1: max profit by network type
     max_profit_df = final_comparisons[final_comparisons['Strategy'] == 'Optimized (Best for each Market)'].sort_values('Gross Operating Profit', ascending=False)
     fig1 = px.bar(max_profit_df, x='Network', y='Gross Operating Profit', color='Network', title='Max Optimized Profit by Network Configuration', labels={'Gross Operating Profit': 'Max Gross Operating Profit ($)'})
@@ -180,6 +208,29 @@ def main():
     fig5.write_image(fig5_path, width=1000, height=550)
     print(f"-> Simple profit comparison chart saved to: {fig5_path}")
     
+    # graph 5: comprehenseive financial summary
+    metrics = [
+        ('Total_Revenue', 'Total Revenue ($)', 'task6_viz_optimal_total_revenue.png'),
+        ('Total_Shipping_Cost', 'Total Shipping Cost ($)', 'task6_viz_optimal_total_shipping_cost.png'),
+        ('Net_Revenue', 'Net Revenue ($)', 'task6_viz_optimal_net_revenue.png'),
+        ('Gross_Operating_Profit', 'Gross Operating Profit ($)', 'task6_viz_optimal_gross_profit.png')
+    ]
+    for metric, label, filename in metrics:
+        financials_full[metric + ' (M)'] = financials_full[metric] / 1e6
+        fig = px.bar(
+            financials_full,
+            x='market_type',
+            y=metric,
+            color='Network',
+            barmode='group',
+            title=f'{label} by Market and Network (Optimal Policy)',
+            labels={metric: label, 'market_type': 'Market Type'},
+            category_orders={'market_type': ['Primary', 'Secondary', 'Tertiary', 'Overall']}
+        )
+        fig_path = OUTPUT_DIR / filename
+        fig.write_image(fig_path, width=1000, height=550)
+        print(f"-> {label} chart saved to: {fig_path}")
+
     print("\nScript finished successfully! 🎉")
 
 if __name__ == "__main__":
