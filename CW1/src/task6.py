@@ -166,13 +166,10 @@ def main():
     # combining summaries
     financials_full = pd.concat([financials_summary, overall_summary], ignore_index=True)
 
-
-
-    # CSV 5: comprehensive financial summary
+    # CSV 4: comprehensive financial summary
     financials_csv_path = OUTPUT_DIR / "task6_optimal_policy_financials.csv"
     financials_full.to_csv(financials_csv_path, index=False)
     print(f"-> Optimal policy financials by market and overall saved to: {financials_csv_path}")
-
 
     # graph 1: max profit by network type
     max_profit_df = final_comparisons[final_comparisons['Strategy'] == 'Optimized (Best for each Market)'].sort_values('Gross Operating Profit', ascending=False)
@@ -235,7 +232,7 @@ def main():
         fig.write_image(fig_path, width=1000, height=550)
         print(f"-> {label} chart saved to: {fig_path}")
 
-    # --- Calculate and Save Optimal OTD Service Matrices ---
+    # for the optimal OTD matrices for the 3 network types
     assignment_data = {
         '1-FC': data_files["assign_1fc"],
         '4-FC': data_files["assign_4fc"],
@@ -246,28 +243,28 @@ def main():
     for network_name, assignment_df in assignment_data.items():
         print(f"Calculating matrix for {network_name} network...")
 
-        # Find which shipment zones actually exist for this network
+        # finding which shipment zones actually exist for this network
         existing_zones = assignment_df['distance_bucket'].unique()
 
-        # Filter the shipping cost table to only include the zones that exist
+        # filtering the shipping cost table to only include the zones that exist
         df_shipping_filtered = df_shipping[df_shipping['distance_bucket'].isin(existing_zones)]
 
-        # Perform the Optimization
+        # running the optimization
         df_full = pd.merge(df_conversion, df_shipping_filtered, on='otd_promise')
 
         PROFIT_MARGIN = PRICE_PER_UNIT - COGS_PER_UNIT
         df_full['expected_profit'] = (PROFIT_MARGIN - df_full['shipping_cost_per_unit']) * df_full['conversion_rate']
 
-        # For each (Zone, Market) pair, find the OTD promise with the max profit
+        # for each cell (zone, market) pair, find the otd promise with the max profit
         optimal_choices = df_full.loc[df_full.groupby(['distance_bucket', 'Market'])['expected_profit'].idxmax()]
         optimal_choices['OTD Service'] = optimal_choices['otd_promise'].apply(lambda x: f"{x}-day" if x < 6 else "5+-day")
         optimal_choices['Network'] = network_name
         all_results.append(optimal_choices)
 
-    # Combine and Format the Final Output
+    # final combined output for all 3 networks
     final_df = pd.concat(all_results)
 
-    # Pivot the results into the final comprehensive matrix
+    # final result answer matrix
     final_matrix = final_df.pivot_table(
         index='distance_bucket',
         columns=['Network', 'Market'],
@@ -275,17 +272,18 @@ def main():
         aggfunc='first'
     )
 
-    # Define a sorted order for the distance buckets (zones)
+    # define a sorted order for the distance buckets
     zone_order = ['<50','51-150','151-300','301-600','601-1000','1001-1400','1401-1800','>1800']
     final_matrix = final_matrix.reindex(zone_order)
 
-    # Reorder columns for clarity
+    # reorder columns 
     final_matrix = final_matrix.reindex(columns=['1-FC', '4-FC', '15-FC'], level='Network')
     final_matrix = final_matrix.reindex(columns=['Primary', 'Secondary', 'Tertiary'], level='Market')
 
     print("\n--- Corrected Optimal OTD Service Matrices ---")
     print(final_matrix.to_string())
-    # Save the final matrix to a CSV file
+    
+    # CSV 5: optimal OTD service matrices
     matrix_csv_path = OUTPUT_DIR / "task6_otd_service_matrices.csv"
     final_matrix.to_csv(matrix_csv_path)
     print(f"\nMatrices saved to: {matrix_csv_path}")
