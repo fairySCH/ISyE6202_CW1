@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+
+
 # Optional: Cartopy map background
 _HAS_CARTOPY = True
 try:
@@ -18,6 +20,13 @@ try:
     import cartopy.feature as cfeature
 except Exception:
     _HAS_CARTOPY = False
+
+
+
+import plotly.graph_objects as go
+import plotly.express as px
+import plotly.io as pio
+
 
 # -----------------------------
 # Configuration
@@ -248,69 +257,211 @@ def build_multisource_clusters(assign: pd.DataFrame, dsub: pd.DataFrame, inv_map
 
     return assign2
 
+
 def plot_clusters(assign2: pd.DataFrame, network_name: str, out_dir: Path):
     """
-    (a) Geographical plot colored by fulfillment clusters (same FC set).
+    (a) Geographical plot colored by fulfillment clusters (same FC set), with Plotly.
     """
-    df = assign2.dropna(subset=["lat","lon","cluster_id"]).copy()
-    color_map = _colormap_by_category(df["cluster_id"])
-    colors = df["cluster_id"].map(color_map)
+    import plotly.graph_objects as go
+    import plotly.express as px
+    import numpy as np
 
-    title = f"Task 4a — Fulfillment Clusters (same/next bucket candidates) — {network_name}"
-    out_path = out_dir / f"task4a_{network_name}_clusters_map.png"
+    df = assign2.dropna(subset=["lat", "lon", "cluster_id"]).copy()
+    df["cluster_id"] = df["cluster_id"].astype(str)
 
-    if _HAS_CARTOPY:
-        proj = ccrs.PlateCarree()
-        fig = plt.figure(figsize=(10,6))
-        ax = plt.axes(projection=proj)
-        ax.add_feature(cfeature.STATES.with_scale("50m"), linewidth=0.5)
-        ax.add_feature(cfeature.COASTLINE.with_scale("50m"), linewidth=0.5)
-        ax.set_extent([-125, -66.5, 24, 49], crs=proj)  # CONUS
-        ax.scatter(df["lon"], df["lat"], s=6, c=colors, transform=proj)
-        ax.set_title(title)
-        plt.savefig(out_path, dpi=220, bbox_inches="tight")
-        plt.close(fig)
-    else:
-        fig, ax = plt.subplots(figsize=(8,6))
-        ax.scatter(df["lon"], df["lat"], s=6, c=colors)
-        ax.set_title(title)
-        ax.set_xlabel("Longitude"); ax.set_ylabel("Latitude")
-        plt.savefig(out_path, dpi=220, bbox_inches="tight")
-        plt.close(fig)
+    # Palette déterministe / répétée au besoin
+    unique_clusters = sorted(df["cluster_id"].unique().tolist())
+    base_palette = (px.colors.qualitative.Safe if px.colors.qualitative.Safe
+                    else px.colors.qualitative.Plotly)
+    repeats = (len(unique_clusters) // len(base_palette)) + 1
+    palette = (base_palette * repeats)[:len(unique_clusters)]
+    color_map = dict(zip(unique_clusters, palette))
+
+    fig = go.Figure()
+
+    # ZIPs colorés par cluster
+    for cid, grp in df.groupby("cluster_id"):
+        cand_names = grp["candidate_fc_name_set"].apply(
+            lambda s: ", ".join(sorted(list(s))) if isinstance(s, frozenset) else str(s)
+        ).astype(str)
+
+        fig.add_trace(go.Scattergeo(
+            lon=grp["lon"], lat=grp["lat"], mode="markers", name=str(cid),
+            marker=dict(size=4, opacity=0.45, color=color_map[str(cid)]),
+            customdata=np.stack([grp["zip3"].values, cand_names.values, grp["preferred_fc"].astype(str).values], axis=1),
+            hovertemplate=("ZIP3: %{customdata[0]}<br>" +
+                           "Cluster: " + str(cid) + "<br>" +
+                           "Candidats: %{customdata[1]}<br>" +
+                           "FC préféré: %{customdata[2]}<extra></extra>")
+        ))
+
+    # ---- AJOUT: triangles = positions des FC ----
+    # Récupérer (FC -> zip3) puis (zip3 -> lon/lat)
+    fc_map = (assign2.dropna(subset=["preferred_fc", "preferred_fc_zip3"])
+                    .drop_duplicates(subset=["preferred_fc"])
+                    .set_index("preferred_fc")["preferred_fc_zip3"].astype(int).to_dict())
+
+    fc_lons, fc_lats, fc_labels = [], [], []
+    for fc_name, fc_zip in fc_map.items():
+        row = assign2.loc[assign2["zip3"] == fc_zip, ["lon", "lat"]].head(1)
+        if not row.empty:
+            fc_lons.append(float(row["lon"].iat[0]))
+            fc_lats.append(float(row["lat"].iat[0]))
+            fc_labels.append(fc_name)
+
+    if fc_lons:
+        fig.add_trace(go.Scattergeo(
+            lon=fc_lons, lat=fc_lats, mode="markers+text",
+            text=fc_labels, textposition="top center",
+            name="FC",
+            marker=dict(symbol="triangle-up", size=14, color="black",
+                        line=dict(width=1, color="white")),
+            hovertemplate="FC: %{text}<extra></extra>",
+            showlegend=False
+        ))
+    # ---------------------------------------------
+
+    fig.update_layout(
+        title=f"Task 4a — Fulfillment Clusters (same/next bucket candidates) — {network_name}",
+        geo=dict(scope="usa", projection_type="albers usa",
+                 showland=True, landcolor="rgb(240,240,240)",
+                 showsubunits=True, subunitcolor="rgb(150,150,150)",
+                 showcountries=True, countrycolor="rgb(150,150,150)",
+                 lataxis=dict(range=[24, 50]), lonaxis=dict(range=[-125, -66.5])),
+        legend=dict(title="Cluster (ensembles de FC)", orientation="v",
+                    yanchor="middle", x=1.02, y=0.5),
+        margin=dict(l=10, r=10, t=50, b=10),
+    )
+
+    fig.show()
+
+
+# def plot_clusters(assign2: pd.DataFrame, network_name: str, out_dir: Path):
+#     """
+#     (a) Geographical plot colored by fulfillment clusters (same FC set).
+#     """
+#     df = assign2.dropna(subset=["lat","lon","cluster_id"]).copy()
+#     color_map = _colormap_by_category(df["cluster_id"])
+#     colors = df["cluster_id"].map(color_map)
+
+#     title = f"Task 4a — Fulfillment Clusters (same/next bucket candidates) — {network_name}"
+#     out_path = out_dir / f"task4a_{network_name}_clusters_map.png"
+
+#     if _HAS_CARTOPY:
+#         proj = ccrs.PlateCarree()
+#         fig = plt.figure(figsize=(10,6))
+#         ax = plt.axes(projection=proj)
+#         ax.add_feature(cfeature.STATES.with_scale("50m"), linewidth=0.5)
+#         ax.add_feature(cfeature.COASTLINE.with_scale("50m"), linewidth=0.5)
+#         ax.set_extent([-125, -66.5, 24, 49], crs=proj)  # CONUS
+#         ax.scatter(df["lon"], df["lat"], s=6, c=colors, transform=proj)
+#         ax.set_title(title)
+#         plt.savefig(out_path, dpi=220, bbox_inches="tight")
+#         plt.close(fig)
+#     else:
+#         fig, ax = plt.subplots(figsize=(8,6))
+#         ax.scatter(df["lon"], df["lat"], s=6, c=colors)
+#         ax.set_title(title)
+#         ax.set_xlabel("Longitude"); ax.set_ylabel("Latitude")
+#         plt.savefig(out_path, dpi=220, bbox_inches="tight")
+#         plt.close(fig)
+
+# def plot_fc_count_heat(assign2: pd.DataFrame, network_name: str, out_dir: Path):
+#     """
+#     (b) Plot colored by number of FCs that can serve the cluster (red=low, green=high).
+#     """
+#     df = assign2.dropna(subset=["lat","lon","candidate_count"]).copy()
+#     sm, (vmin, vmax) = _colormap_red_yellow_green(df["candidate_count"])
+#     colors = sm.to_rgba(df["candidate_count"].values)
+
+#     title = f"Task 4b — Candidate FC Count per ZIP (red=low → green=high) — {network_name}"
+#     out_path = out_dir / f"task4b_{network_name}_fc_count_map.png"
+
+#     if _HAS_CARTOPY:
+#         proj = ccrs.PlateCarree()
+#         fig = plt.figure(figsize=(10,6))
+#         ax = plt.axes(projection=proj)
+#         ax.add_feature(cfeature.STATES.with_scale("50m"), linewidth=0.5)
+#         ax.add_feature(cfeature.COASTLINE.with_scale("50m"), linewidth=0.5)
+#         ax.set_extent([-125, -66.5, 24, 49], crs=proj)
+#         sc = ax.scatter(df["lon"], df["lat"], s=6, c=df["candidate_count"], cmap="RdYlGn", transform=proj, vmin=vmin, vmax=vmax)
+#         cbar = plt.colorbar(sc, ax=ax, shrink=0.7)
+#         cbar.set_label("# of candidate FCs")
+#         ax.set_title(title)
+#         plt.savefig(out_path, dpi=220, bbox_inches="tight")
+#         plt.close(fig)
+#     else:
+#         fig, ax = plt.subplots(figsize=(8,6))
+#         sc = ax.scatter(df["lon"], df["lat"], s=6, c=df["candidate_count"], cmap="RdYlGn", vmin=vmin, vmax=vmax)
+#         cbar = plt.colorbar(sc, ax=ax, shrink=0.7)
+#         cbar.set_label("# of candidate FCs")
+#         ax.set_title(title)
+#         ax.set_xlabel("Longitude"); ax.set_ylabel("Latitude")
+#         plt.savefig(out_path, dpi=220, bbox_inches="tight")
+#         plt.close(fig)
+
 
 def plot_fc_count_heat(assign2: pd.DataFrame, network_name: str, out_dir: Path):
     """
-    (b) Plot colored by number of FCs that can serve the cluster (red=low, green=high).
+    (b) Plot colored by number of FCs that can serve the cluster (red=low → green=high) avec Plotly.
     """
-    df = assign2.dropna(subset=["lat","lon","candidate_count"]).copy()
-    sm, (vmin, vmax) = _colormap_red_yellow_green(df["candidate_count"])
-    colors = sm.to_rgba(df["candidate_count"].values)
+    import plotly.graph_objects as go
+    import numpy as np
 
-    title = f"Task 4b — Candidate FC Count per ZIP (red=low → green=high) — {network_name}"
-    out_path = out_dir / f"task4b_{network_name}_fc_count_map.png"
+    df = assign2.dropna(subset=["lat", "lon", "candidate_count"]).copy()
+    vmin, vmax = float(df["candidate_count"].min()), float(df["candidate_count"].max())
 
-    if _HAS_CARTOPY:
-        proj = ccrs.PlateCarree()
-        fig = plt.figure(figsize=(10,6))
-        ax = plt.axes(projection=proj)
-        ax.add_feature(cfeature.STATES.with_scale("50m"), linewidth=0.5)
-        ax.add_feature(cfeature.COASTLINE.with_scale("50m"), linewidth=0.5)
-        ax.set_extent([-125, -66.5, 24, 49], crs=proj)
-        sc = ax.scatter(df["lon"], df["lat"], s=6, c=df["candidate_count"], cmap="RdYlGn", transform=proj, vmin=vmin, vmax=vmax)
-        cbar = plt.colorbar(sc, ax=ax, shrink=0.7)
-        cbar.set_label("# of candidate FCs")
-        ax.set_title(title)
-        plt.savefig(out_path, dpi=220, bbox_inches="tight")
-        plt.close(fig)
-    else:
-        fig, ax = plt.subplots(figsize=(8,6))
-        sc = ax.scatter(df["lon"], df["lat"], s=6, c=df["candidate_count"], cmap="RdYlGn", vmin=vmin, vmax=vmax)
-        cbar = plt.colorbar(sc, ax=ax, shrink=0.7)
-        cbar.set_label("# of candidate FCs")
-        ax.set_title(title)
-        ax.set_xlabel("Longitude"); ax.set_ylabel("Latitude")
-        plt.savefig(out_path, dpi=220, bbox_inches="tight")
-        plt.close(fig)
+    fig = go.Figure(go.Scattergeo(
+        lon=df["lon"], lat=df["lat"], mode="markers", name="ZIP3",
+        marker=dict(size=4, opacity=0.7, color=df["candidate_count"],
+                    colorscale="RdYlGn", cmin=vmin, cmax=vmax,
+                    colorbar=dict(title="# candidate FCs")),
+        customdata=np.stack([df["zip3"].values, df["candidate_count"].values,
+                             df["preferred_fc"].astype(str).values], axis=1),
+        hovertemplate=("ZIP3: %{customdata[0]}<br>" +
+                       "Candidats: %{customdata[1]}<br>" +
+                       "FC préféré: %{customdata[2]}<extra></extra>")
+    ))
+
+    # ---- AJOUT: triangles = positions des FC ----
+    fc_map = (assign2.dropna(subset=["preferred_fc", "preferred_fc_zip3"])
+                    .drop_duplicates(subset=["preferred_fc"])
+                    .set_index("preferred_fc")["preferred_fc_zip3"].astype(int).to_dict())
+
+    fc_lons, fc_lats, fc_labels = [], [], []
+    for fc_name, fc_zip in fc_map.items():
+        row = assign2.loc[assign2["zip3"] == fc_zip, ["lon", "lat"]].head(1)
+        if not row.empty:
+            fc_lons.append(float(row["lon"].iat[0]))
+            fc_lats.append(float(row["lat"].iat[0]))
+            fc_labels.append(fc_name)
+
+    if fc_lons:
+        fig.add_trace(go.Scattergeo(
+            lon=fc_lons, lat=fc_lats, mode="markers+text",
+            text=fc_labels, textposition="top center",
+            name="FC",
+            marker=dict(symbol="triangle-up", size=14, color="black",
+                        line=dict(width=1, color="white")),
+            hovertemplate="FC: %{text}<extra></extra>",
+            showlegend=False
+        ))
+    # ---------------------------------------------
+
+    fig.update_layout(
+        title=f"Task 4b — Candidate FC Count per ZIP (red=low → green=high) — {network_name}",
+        geo=dict(scope="usa", projection_type="albers usa",
+                 showland=True, landcolor="rgb(240,240,240)",
+                 showsubunits=True, subunitcolor="rgb(150,150,150)",
+                 showcountries=True, countrycolor="rgb(150,150,150)",
+                 lataxis=dict(range=[24, 50]), lonaxis=dict(range=[-125, -66.5])),
+        margin=dict(l=10, r=10, t=50, b=10),
+        showlegend=False
+    )
+
+    fig.show()
+
+
 
 def compute_single_fc_proportion(assign2: pd.DataFrame) -> pd.DataFrame:
     """
@@ -416,17 +567,41 @@ def save_tables_and_plots(network_name: str, assign2: pd.DataFrame, dsub: pd.Dat
     realloc_dist.to_csv(out_dir / f"task4_{network_name}_bucket_distribution_reallocated.csv", index=False)
 
     # Small comparison plot (shares by bucket)
-    fig, ax = plt.subplots(figsize=(9,4.5))
-    ax.plot(baseline_dist["bucket"], baseline_dist["demand_share"], marker="o", label="Closest-only")
-    ax.plot(realloc_dist["bucket"], realloc_dist["demand_share"], marker="s", label="90/10 reallocated")
-    ax.set_title(f"Task 4d — Distance-bucket demand share (baseline vs 90/10) — {network_name}")
-    ax.set_xlabel("Distance bucket (miles)")
-    ax.set_ylabel("Demand share")
-    ax.legend()
-    plt.xticks(rotation=30)
-    plt.tight_layout()
-    plt.savefig(out_dir / f"task4d_{network_name}_bucket_share_comparison.png", dpi=220)
-    plt.close(fig)
+    # fig, ax = plt.subplots(figsize=(9,4.5))
+    # ax.plot(baseline_dist["bucket"], baseline_dist["demand_share"], marker="o", label="Closest-only")
+    # ax.plot(realloc_dist["bucket"], realloc_dist["demand_share"], marker="s", label="90/10 reallocated")
+    # ax.set_title(f"Task 4d — Distance-bucket demand share (baseline vs 90/10) — {network_name}")
+    # ax.set_xlabel("Distance bucket (miles)")
+    # ax.set_ylabel("Demand share")
+    # ax.legend()
+    # plt.xticks(rotation=30)
+    # plt.tight_layout()
+    # plt.savefig(out_dir / f"task4d_{network_name}_bucket_share_comparison.png", dpi=220)
+    # plt.close(fig)
+        # Small comparison plot (shares by bucket) — Plotly
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=baseline_dist["bucket"], y=baseline_dist["demand_share"],
+        mode="lines+markers", name="Closest-only"
+    ))
+    fig.add_trace(go.Scatter(
+        x=realloc_dist["bucket"], y=realloc_dist["demand_share"],
+        mode="lines+markers", name="90/10 reallocated"
+    ))
+    fig.update_layout(
+        title=f"Task 4d — Distance-bucket demand share (baseline vs 90/10) — {network_name}",
+        xaxis_title="Distance bucket (miles)",
+        yaxis_title="Demand share",
+        yaxis_tickformat=".0%",
+        margin=dict(l=10, r=10, t=50, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+
+    fig.show()
+
+
+
 
 def run_for_network(network_name: str, network_dict: dict):
     print(f"▶ Running Task 4 for network {network_name} ...")
