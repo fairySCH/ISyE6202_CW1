@@ -137,8 +137,7 @@ def calculate_financials_for_scenario(df_demand, df_assignment, network_name, df
 def main():
     data_files = load_data()
     df_demand = prepare_demand_data(data_files["seasonalities"], data_files["zip3_pmf"])
-
-    print("Defining financial models...")
+    
     # given conversion rate data
     data_conversion = {'Market': ['Primary','Secondary','Tertiary'],1:[1.00,1.00,1.00],2:[0.90,1.00,1.00],3:[0.75,0.95,1.00],4:[0.60,0.75,0.95],5:[0.40,0.60,0.80],'5+':[0.30,0.40,0.60]}
     df_conversion = pd.DataFrame(data_conversion).melt(id_vars='Market', var_name='otd_promise', value_name='conversion_rate')
@@ -166,6 +165,55 @@ def main():
     final_summary_df.to_csv(summary_csv_path, index=False)
     print(f"-> Main summary table saved to: {summary_csv_path}")
     
+    # CSV 2: save demand per ZIP per day for task 6 use
+    print("Saving demand per ZIP per day table...")
+    demand_csv_path = OUTPUT_DIR / "task5_demand_by_zip.csv"
+    df_demand.to_csv(demand_csv_path, index=False)
+    print(f"-> Demand table saved to: {demand_csv_path}")
+
+    # CSV 3: detailed profit breakdown by market type (for 1-FC network)
+    print("Generating detailed profit breakdown by market type (for 1-FC network)...")
+    df_expanded_1fc = pd.merge(df_demand, data_files["assign_1fc"], on='zip3')
+    df_expanded_1fc = pd.merge(df_expanded_1fc, df_conversion, left_on='market_type', right_on='Market')
+    df_expanded_1fc = pd.merge(df_expanded_1fc, df_shipping, on=['distance_bucket', 'otd_promise'])
+    df_expanded_1fc['gross_operating_profit'] = ((df_expanded_1fc['demand_units'] * df_expanded_1fc['conversion_rate']) * PRICE_PER_UNIT) - \
+                                                ((df_expanded_1fc['demand_units'] * df_expanded_1fc['conversion_rate']) * df_expanded_1fc['shipping_cost_per_unit']) - \
+                                                ((df_expanded_1fc['demand_units'] * df_expanded_1fc['conversion_rate']) * COGS_PER_UNIT)
+    market_profit_by_otd_1fc = df_expanded_1fc.groupby(['market_type', 'otd_promise'])['gross_operating_profit'].sum().reset_index()
+    market_profit_by_otd_1fc['OTD Promise (Days)'] = market_profit_by_otd_1fc['otd_promise'].apply(lambda x: str(x) if x < 6 else '5+')
+    market_breakdown_csv_path_1fc = OUTPUT_DIR / "task5_profit_by_market_type_(1-FC).csv"
+    market_profit_by_otd_1fc[['market_type', 'OTD Promise (Days)', 'gross_operating_profit']].to_csv(market_breakdown_csv_path_1fc, index=False)
+    print(f"-> Profit breakdown by market type saved to: {market_breakdown_csv_path_1fc}")
+
+  
+    # CSV 4: detailed profit breakdown by market type (for 4-FC network)
+    print("Generating detailed profit breakdown by market type (for 4-FC network)...")
+    df_expanded = pd.merge(df_demand, data_files["assign_4fc"], on='zip3')
+    df_expanded = pd.merge(df_expanded, df_conversion, left_on='market_type', right_on='Market')
+    df_expanded = pd.merge(df_expanded, df_shipping, on=['distance_bucket', 'otd_promise'])
+    df_expanded['gross_operating_profit'] = ((df_expanded['demand_units'] * df_expanded['conversion_rate']) * PRICE_PER_UNIT) - \
+                                                ((df_expanded['demand_units'] * df_expanded['conversion_rate']) * df_expanded['shipping_cost_per_unit']) - \
+                                                ((df_expanded['demand_units'] * df_expanded['conversion_rate']) * COGS_PER_UNIT)
+    market_profit_by_otd = df_expanded.groupby(['market_type', 'otd_promise'])['gross_operating_profit'].sum().reset_index()
+    market_profit_by_otd['OTD Promise (Days)'] = market_profit_by_otd['otd_promise'].apply(lambda x: str(x) if x < 6 else '5+')
+    market_breakdown_csv_path = OUTPUT_DIR / "task5_profit_by_market_type_(4-FC).csv"
+    market_profit_by_otd[['market_type', 'OTD Promise (Days)', 'gross_operating_profit']].to_csv(market_breakdown_csv_path, index=False)
+    print(f"-> Profit breakdown by market type saved to: {market_breakdown_csv_path}")
+
+    # CSV 5: detailed profit breakdown by market type (for 15-FC network)
+    print("Generating detailed profit breakdown by market type (for 15-FC network)...")
+    df_expanded_15fc = pd.merge(df_demand, data_files["assign_15fc"], on='zip3')
+    df_expanded_15fc = pd.merge(df_expanded_15fc, df_conversion, left_on='market_type', right_on='Market')
+    df_expanded_15fc = pd.merge(df_expanded_15fc, df_shipping, on=['distance_bucket', 'otd_promise'])
+    df_expanded_15fc['gross_operating_profit'] = ((df_expanded_15fc['demand_units'] * df_expanded_15fc['conversion_rate']) * PRICE_PER_UNIT) - \
+                                                 ((df_expanded_15fc['demand_units'] * df_expanded_15fc['conversion_rate']) * df_expanded_15fc['shipping_cost_per_unit']) - \
+                                                 ((df_expanded_15fc['demand_units'] * df_expanded_15fc['conversion_rate']) * COGS_PER_UNIT)
+    market_profit_by_otd_15fc = df_expanded_15fc.groupby(['market_type', 'otd_promise'])['gross_operating_profit'].sum().reset_index()
+    market_profit_by_otd_15fc['OTD Promise (Days)'] = market_profit_by_otd_15fc['otd_promise'].apply(lambda x: str(x) if x < 6 else '5+')
+    market_breakdown_csv_path_15fc = OUTPUT_DIR / "task5_profit_by_market_type_(15-FC).csv"
+    market_profit_by_otd_15fc[['market_type', 'OTD Promise (Days)', 'gross_operating_profit']].to_csv(market_breakdown_csv_path_15fc, index=False)
+    print(f"-> Profit breakdown by market type saved to: {market_breakdown_csv_path_15fc}") 
+
     # graph 1: gross operating profit by otd value and network type
     fig = px.bar(
         final_summary_df,
@@ -301,48 +349,6 @@ def main():
     fig_tradeoff.write_image(tradeoff_chart_path, width=1000, height=800)
     print(f"-> Trade-off chart saved to: {tradeoff_chart_path}")
 
-    # CSV 2: detailed profit breakdown by market type (for 1-FC network)
-    print("Generating detailed profit breakdown by market type (for 1-FC network)...")
-    df_expanded_1fc = pd.merge(df_demand, data_files["assign_1fc"], on='zip3')
-    df_expanded_1fc = pd.merge(df_expanded_1fc, df_conversion, left_on='market_type', right_on='Market')
-    df_expanded_1fc = pd.merge(df_expanded_1fc, df_shipping, on=['distance_bucket', 'otd_promise'])
-    df_expanded_1fc['gross_operating_profit'] = ((df_expanded_1fc['demand_units'] * df_expanded_1fc['conversion_rate']) * PRICE_PER_UNIT) - \
-                                                ((df_expanded_1fc['demand_units'] * df_expanded_1fc['conversion_rate']) * df_expanded_1fc['shipping_cost_per_unit']) - \
-                                                ((df_expanded_1fc['demand_units'] * df_expanded_1fc['conversion_rate']) * COGS_PER_UNIT)
-    market_profit_by_otd_1fc = df_expanded_1fc.groupby(['market_type', 'otd_promise'])['gross_operating_profit'].sum().reset_index()
-    market_profit_by_otd_1fc['OTD Promise (Days)'] = market_profit_by_otd_1fc['otd_promise'].apply(lambda x: str(x) if x < 6 else '5+')
-    market_breakdown_csv_path_1fc = OUTPUT_DIR / "task5_profit_by_market_type_(1-FC).csv"
-    market_profit_by_otd_1fc[['market_type', 'OTD Promise (Days)', 'gross_operating_profit']].to_csv(market_breakdown_csv_path_1fc, index=False)
-    print(f"-> Profit breakdown by market type saved to: {market_breakdown_csv_path_1fc}")
-
-  
-    # CSV 3: detailed profit breakdown by market type (for 4-FC network)
-    print("Generating detailed profit breakdown by market type (for 4-FC network)...")
-    df_expanded = pd.merge(df_demand, data_files["assign_4fc"], on='zip3')
-    df_expanded = pd.merge(df_expanded, df_conversion, left_on='market_type', right_on='Market')
-    df_expanded = pd.merge(df_expanded, df_shipping, on=['distance_bucket', 'otd_promise'])
-    df_expanded['gross_operating_profit'] = ((df_expanded['demand_units'] * df_expanded['conversion_rate']) * PRICE_PER_UNIT) - \
-                                                ((df_expanded['demand_units'] * df_expanded['conversion_rate']) * df_expanded['shipping_cost_per_unit']) - \
-                                                ((df_expanded['demand_units'] * df_expanded['conversion_rate']) * COGS_PER_UNIT)
-    market_profit_by_otd = df_expanded.groupby(['market_type', 'otd_promise'])['gross_operating_profit'].sum().reset_index()
-    market_profit_by_otd['OTD Promise (Days)'] = market_profit_by_otd['otd_promise'].apply(lambda x: str(x) if x < 6 else '5+')
-    market_breakdown_csv_path = OUTPUT_DIR / "task5_profit_by_market_type_(4-FC).csv"
-    market_profit_by_otd[['market_type', 'OTD Promise (Days)', 'gross_operating_profit']].to_csv(market_breakdown_csv_path, index=False)
-    print(f"-> Profit breakdown by market type saved to: {market_breakdown_csv_path}")
-
-    # CSV 4: detailed profit breakdown by market type (for 15-FC network)
-    print("Generating detailed profit breakdown by market type (for 15-FC network)...")
-    df_expanded_15fc = pd.merge(df_demand, data_files["assign_15fc"], on='zip3')
-    df_expanded_15fc = pd.merge(df_expanded_15fc, df_conversion, left_on='market_type', right_on='Market')
-    df_expanded_15fc = pd.merge(df_expanded_15fc, df_shipping, on=['distance_bucket', 'otd_promise'])
-    df_expanded_15fc['gross_operating_profit'] = ((df_expanded_15fc['demand_units'] * df_expanded_15fc['conversion_rate']) * PRICE_PER_UNIT) - \
-                                                 ((df_expanded_15fc['demand_units'] * df_expanded_15fc['conversion_rate']) * df_expanded_15fc['shipping_cost_per_unit']) - \
-                                                 ((df_expanded_15fc['demand_units'] * df_expanded_15fc['conversion_rate']) * COGS_PER_UNIT)
-    market_profit_by_otd_15fc = df_expanded_15fc.groupby(['market_type', 'otd_promise'])['gross_operating_profit'].sum().reset_index()
-    market_profit_by_otd_15fc['OTD Promise (Days)'] = market_profit_by_otd_15fc['otd_promise'].apply(lambda x: str(x) if x < 6 else '5+')
-    market_breakdown_csv_path_15fc = OUTPUT_DIR / "task5_profit_by_market_type_(15-FC).csv"
-    market_profit_by_otd_15fc[['market_type', 'OTD Promise (Days)', 'gross_operating_profit']].to_csv(market_breakdown_csv_path_15fc, index=False)
-    print(f"-> Profit breakdown by market type saved to: {market_breakdown_csv_path_15fc}") 
 
     print("\nScript complete.")
 if __name__ == "__main__":
