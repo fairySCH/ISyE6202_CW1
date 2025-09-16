@@ -24,8 +24,19 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 import seaborn as sns
+
+# supprime/ignore cartopy et seaborn
+# import cartopy.crs as ccrs
+# import cartopy.feature as cfeature
+# import seaborn as sns
+
 import plotly.graph_objects as go
+import plotly.express as px
+import plotly.io as pio
+
 
 # -----------------------------
 # Configuration
@@ -135,61 +146,48 @@ def assign_preferred_fc(network_dict):
                                                categories=BUCKET_LABELS, ordered=True)
     return assign
 
-def plot_clusters_plotly(assign, network_name):
-    """Plot clusters using Plotly (interactive HTML)."""
+def plot_clusters(assign, network_name):
+    """Plot ZIP clusters by preferred FC with FCs shown as triangles."""
+    fig = plt.figure(figsize=(12, 7))
+    ax = plt.axes(projection=ccrs.LambertConformal())
+    ax.set_extent([-125, -66.5, 24, 50], crs=ccrs.PlateCarree())
+
+    # Map features
+    ax.add_feature(cfeature.COASTLINE.with_scale('50m'))
+    ax.add_feature(cfeature.BORDERS.with_scale('50m'))
+    ax.add_feature(cfeature.STATES.with_scale('50m'), linewidth=0.5)
+
+    # Color palette
     fc_names = sorted(assign["preferred_fc"].dropna().unique())
     palette = sns.color_palette("husl", n_colors=len(fc_names))
-    color_map = {fc: f"rgb({int(r*255)}, {int(g*255)}, {int(b*255)})"
-                 for fc, (r,g,b) in zip(fc_names, palette)}
-
-    fig = go.Figure()
+    color_map = {fc: palette[i] for i, fc in enumerate(fc_names)}
 
     # ZIP dots
     for fc_name, grp in assign.groupby("preferred_fc"):
-        fig.add_trace(go.Scattergeo(
-            lon=grp["lon"],
-            lat=grp["lat"],
-            mode="markers",
-            name=f"{fc_name} ZIPs",
-            marker=dict(size=3, color=color_map.get(fc_name, "gray"), opacity=0.5),
-            hoverinfo="text",
-            text=[f"ZIP3: {z}, Market: {m}" for z, m in zip(grp["zip3"], grp["market_type"])]
-        ))
+        ax.scatter(grp["lon"], grp["lat"], s=6, alpha=0.4,
+                   color=color_map.get(fc_name, "gray"),
+                   transform=ccrs.PlateCarree(), label=fc_name)
 
     # FC triangles
     fc_map = assign.dropna(subset=["preferred_fc_zip3"]) \
                    .groupby("preferred_fc")["preferred_fc_zip3"].first().to_dict()
     for fc_name, fc_zip in fc_map.items():
-        row = assign[assign["zip3"] == int(fc_zip)]
+        row = base[base["zip3"] == int(fc_zip)]
         if len(row) > 0:
-            fig.add_trace(go.Scattergeo(
-                lon=[float(row["lon"].iloc[0])],
-                lat=[float(row["lat"].iloc[0])],
-                mode="markers+text",
-                name=f"{fc_name} (FC)",
-                marker=dict(size=12, symbol="triangle-up",
-                            color=color_map.get(fc_name, "red"),
-                            line=dict(width=1, color="black")),
-                text=[fc_name],
-                textposition="top center"
-            ))
+            ax.scatter(float(row["lon"].iloc[0]), float(row["lat"].iloc[0]),
+                       s=200, marker="^", color=color_map.get(fc_name, "red"),
+                       edgecolor="black", linewidths=0.7,
+                       label=f"{fc_name} (FC)",
+                       transform=ccrs.PlateCarree(), zorder=5)
 
-    fig.update_layout(
-        title=f"Task 3a — ZIP3 Clusters by Preferred FC ({network_name})",
-        geo=dict(
-            scope="usa",
-            projection=dict(type="albers usa"),
-            showland=True, landcolor="rgb(240,240,240)",
-            subunitcolor="rgb(100,100,100)",
-            countrycolor="rgb(100,100,100)"
-        ),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.25,
-                    xanchor="center", x=0.5)
-    )
+    # Legend
+    ax.legend(markerscale=0.7, fontsize=7, ncol=1, frameon=False,
+              loc="center right", bbox_to_anchor=(-0.1, 0.5))
+    plt.subplots_adjust(left=0.15)
 
-    out_path = OUT_DIR / f"task3a_{network_name}_map_plotly.html"
-    fig.write_html(out_path)
-    print(f"  ✓ Saved interactive map: {out_path}")
+    ax.set_title(f"Task 3a — ZIP3 Clusters by Preferred FC ({network_name})", fontsize=12)
+    plt.savefig(OUT_DIR / f"task3a_{network_name}_map.png", dpi=200, bbox_inches="tight")
+    plt.close(fig)
 
 def plot_fc_market_demand_share(network_name: str):
     """Grouped bar chart: demand share by FC × Market."""
@@ -273,6 +271,11 @@ def compute_task3c(assign, network_name):
     fcm = fcm.reindex(full_idx2, fill_value=0).reset_index()
     fcm = fcm.rename(columns={"pmf_norm": "demand_share"})
     fcm.to_csv(OUT_DIR / f"task3c_fc_market_distance_distribution_{network_name}.csv", index=False)
+
+
+
+
+
 
 def run_for_network(network_name, fc_dict):
     assign = assign_preferred_fc(fc_dict)

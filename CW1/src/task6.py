@@ -52,33 +52,35 @@ def load_data():
 
 def solve_task_6(df_demand, df_assignment, network_name, df_conversion, df_shipping, df_task5_summary):
     print(f"Running optimization for {network_name} network...")
-    # merge demand by zip table with zip assignment table
+    # merge demand by zip table with zip assignment table. used gemini for dataframe operations
     df_full = pd.merge(df_demand, df_assignment, on='zip3')
     # merging with conversion rates and shipping costs
     df_expanded = pd.merge(df_full, df_conversion, left_on='market_type', right_on='Market')
     df_expanded = pd.merge(df_expanded, df_shipping, on=['distance_bucket', 'otd_promise'])
+    # calculating converted demand and financials for each scenario
     df_expanded['converted_demand'] = df_expanded['demand_units'] * df_expanded['conversion_rate']
     df_expanded['total_revenue'] = df_expanded['converted_demand'] * PRICE_PER_UNIT
     df_expanded['total_shipping_cost'] = df_expanded['converted_demand'] * df_expanded['shipping_cost_per_unit']
     df_expanded['total_cogs'] = df_expanded['converted_demand'] * COGS_PER_UNIT
     df_expanded['gross_operating_profit'] = (df_expanded['total_revenue'] - df_expanded['total_shipping_cost'] - df_expanded['total_cogs'])
-    
+    # summing up financials by market type and otd promise
     financials_by_choice = df_expanded.groupby(['market_type', 'otd_promise']).agg(
         gross_operating_profit=('gross_operating_profit', 'sum'),
         total_revenue=('total_revenue', 'sum'),
         total_shipping_cost=('total_shipping_cost', 'sum'),
         total_cogs=('total_cogs', 'sum')
     ).reset_index()
-    
+    # greedy algorithm - for each market type, selects the otd promise that gives the highest profit
     optimal_choices = financials_by_choice.loc[financials_by_choice.groupby('market_type')['gross_operating_profit'].idxmax()]
     optimal_choices['OTD Promise (Days)'] = optimal_choices['otd_promise'].apply(lambda x: str(x) if x < 6 else '5+')
     optimal_choices['Network'] = network_name
-    
+    # sum the profit from greedy choices to find overall network profits
     optimized_profit = optimal_choices['gross_operating_profit'].sum()
+    # profits for extremes (1 and 5+ otd)
     task5_network_summary = df_task5_summary[df_task5_summary['Network'] == network_name]
     profit_1_day_all = task5_network_summary[task5_network_summary['OTD Promise (Days)'] == '1']['Gross Operating Profit'].iloc[0]
     profit_5plus_day_all = task5_network_summary[task5_network_summary['OTD Promise (Days)'] == '5+']['Gross Operating Profit'].iloc[0]
-
+    #  comparing to extremes
     comparison_data = {'Strategy': ['Optimized (Best for each Market)', '1-Day Promise for ALL', '5+ Day Promise for ALL'], 'Gross Operating Profit': [optimized_profit, profit_1_day_all, profit_5plus_day_all]}
     comparison_df = pd.DataFrame(comparison_data)
     comparison_df['Network'] = network_name
@@ -105,10 +107,10 @@ def main():
         (data_files["assign_4fc"], "4-FC"),
         (data_files["assign_15fc"], "15-FC"),
     ]
+
     all_optimal_choices, all_comparisons = [], []
     # iterate through each scenario
     for df_assignment, network_name in scenarios:
-        # Ensure zip3 columns are strings and zero-padded for each assignment
         df_assignment['zip3'] = df_assignment['zip3'].astype(str).str.zfill(3)
         optimal_df, comparison_df = solve_task_6(
             df_demand, df_assignment, network_name,
@@ -121,7 +123,7 @@ def main():
     final_comparisons = pd.concat(all_comparisons, ignore_index=True)
 
     print("Analysis complete. Saving primary outputs...")
-
+    # used gemini for plots and CSV saving (including plotly syntax)
     # CSV 1: optimal otd promise by market type for each network
     optimal_choices_to_save = final_optimal_choices.set_index(['Network', 'market_type']).copy()
     optimal_choices_to_save['gross_operating_profit'] = optimal_choices_to_save['gross_operating_profit'].map('${:,.0f}'.format)
@@ -142,7 +144,7 @@ def main():
     detailed_optimal_df.to_csv(detailed_optimal_path, index=False)
     print(f"-> Detailed optimal policy financials saved to: {detailed_optimal_path}")
 
-    # Compute expected financials by market and overall for the optimal policy
+    # expected financials by market and overall for the optimal policy
     financials_summary = final_optimal_choices.groupby(['Network', 'market_type']).agg(
         Total_Revenue=('total_revenue', 'sum'),
         Total_Shipping_Cost=('total_shipping_cost', 'sum'),
@@ -151,7 +153,7 @@ def main():
     ).reset_index()
     financials_summary['Net_Revenue'] = financials_summary['Total_Revenue'] - financials_summary['Total_Shipping_Cost']
 
-    # Compute overall totals for each network
+    # calculating total revenue, net revenue and cogs for each network
     overall_summary = financials_summary.groupby('Network').agg(
         Total_Revenue=('Total_Revenue', 'sum'),
         Total_Shipping_Cost=('Total_Shipping_Cost', 'sum'),
@@ -161,14 +163,13 @@ def main():
     ).reset_index()
     overall_summary['market_type'] = 'Overall'
 
-    # Combine market and overall summaries
+    # combining summaries
     financials_full = pd.concat([financials_summary, overall_summary], ignore_index=True)
 
     # CSV 4: comprehensive financial summary
     financials_csv_path = OUTPUT_DIR / "task6_optimal_policy_financials.csv"
     financials_full.to_csv(financials_csv_path, index=False)
     print(f"-> Optimal policy financials by market and overall saved to: {financials_csv_path}")
-
 
     # graph 1: max profit by network type
     max_profit_df = final_comparisons[final_comparisons['Strategy'] == 'Optimized (Best for each Market)'].sort_values('Gross Operating Profit', ascending=False)
@@ -231,6 +232,62 @@ def main():
         fig.write_image(fig_path, width=1000, height=550)
         print(f"-> {label} chart saved to: {fig_path}")
 
+    # for the optimal OTD matrices for the 3 network types
+    assignment_data = {
+        '1-FC': data_files["assign_1fc"],
+        '4-FC': data_files["assign_4fc"],
+        '15-FC': data_files["assign_15fc"]
+    }
+    all_results = []
+
+    for network_name, assignment_df in assignment_data.items():
+        print(f"Calculating matrix for {network_name} network...")
+
+        # finding which shipment zones actually exist for this network
+        existing_zones = assignment_df['distance_bucket'].unique()
+
+        # filtering the shipping cost table to only include the zones that exist
+        df_shipping_filtered = df_shipping[df_shipping['distance_bucket'].isin(existing_zones)]
+
+        # running the optimization
+        df_full = pd.merge(df_conversion, df_shipping_filtered, on='otd_promise')
+
+        PROFIT_MARGIN = PRICE_PER_UNIT - COGS_PER_UNIT
+        df_full['expected_profit'] = (PROFIT_MARGIN - df_full['shipping_cost_per_unit']) * df_full['conversion_rate']
+
+        # for each cell (zone, market) pair, find the otd promise with the max profit
+        optimal_choices = df_full.loc[df_full.groupby(['distance_bucket', 'Market'])['expected_profit'].idxmax()]
+        optimal_choices['OTD Service'] = optimal_choices['otd_promise'].apply(lambda x: f"{x}-day" if x < 6 else "5+-day")
+        optimal_choices['Network'] = network_name
+        all_results.append(optimal_choices)
+
+    # final combined output for all 3 networks
+    final_df = pd.concat(all_results)
+
+    # final result answer matrix
+    final_matrix = final_df.pivot_table(
+        index='distance_bucket',
+        columns=['Network', 'Market'],
+        values='OTD Service',
+        aggfunc='first'
+    )
+
+    # define a sorted order for the distance buckets
+    zone_order = ['<50','51-150','151-300','301-600','601-1000','1001-1400','1401-1800','>1800']
+    final_matrix = final_matrix.reindex(zone_order)
+
+    # reorder columns 
+    final_matrix = final_matrix.reindex(columns=['1-FC', '4-FC', '15-FC'], level='Network')
+    final_matrix = final_matrix.reindex(columns=['Primary', 'Secondary', 'Tertiary'], level='Market')
+
+    print("\n--- Corrected Optimal OTD Service Matrices ---")
+    print(final_matrix.to_string())
+    
+    # CSV 5: optimal OTD service matrices
+    matrix_csv_path = OUTPUT_DIR / "task6_otd_service_matrices.csv"
+    final_matrix.to_csv(matrix_csv_path)
+    print(f"\nMatrices saved to: {matrix_csv_path}")
+    
     print("\nScript finished successfully! 🎉")
 
 if __name__ == "__main__":
